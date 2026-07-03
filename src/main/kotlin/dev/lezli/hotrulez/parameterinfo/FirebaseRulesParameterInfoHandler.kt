@@ -16,6 +16,7 @@ import dev.lezli.hotrulez.psi.FirebaseRulesFunctionDeclaration
 import dev.lezli.hotrulez.psi.FirebaseRulesMemberExpression
 import dev.lezli.hotrulez.psi.FirebaseRulesReferenceExpression
 import dev.lezli.hotrulez.psi.FirebaseRulesTypes as T
+import dev.lezli.hotrulez.references.FirebaseRulesMemberPath
 import dev.lezli.hotrulez.references.FirebaseRulesScopes
 import dev.lezli.hotrulez.references.RulesService
 
@@ -161,12 +162,20 @@ class FirebaseRulesParameterInfoHandler :
 
     /**
      * The cross-service `firestore.get`/`firestore.exists` helpers (a single `path`
-     * argument); any other member call (e.g. `math.abs`) offers nothing.
+     * argument); any other member call (e.g. `math.abs`) offers nothing. The receiver key
+     * is built from tokens via the shared [FirebaseRulesMemberPath.receiverKey] (matching
+     * the documentation provider and completion), and the pair is validated against the
+     * file's dialect member table — so it never fires inside a Cloud Firestore file, where
+     * `firestore` is not a namespace.
      */
     private fun memberSignatures(callee: FirebaseRulesMemberExpression): List<SignaturePresentation> {
-        val receiver = callee.expression.text?.filterNot { it.isWhitespace() }
-        val member = callee.identifier.text ?: return emptyList()
-        if (receiver == FIRESTORE_NAMESPACE && member in RulesService.CROSS_SERVICE_HELPERS) {
+        val receiver = FirebaseRulesMemberPath.receiverKey(callee.expression)
+        val member = callee.identifier.text
+        val members = RulesService.membersFor(RulesService.forElement(callee))
+        if (receiver == FIRESTORE_NAMESPACE &&
+            member in RulesService.CROSS_SERVICE_HELPERS &&
+            member in members[receiver].orEmpty()
+        ) {
             return listOf(SignaturePresentation(listOf(PATH_PARAM), FirebaseRulesDocs.forHelper(member)?.title))
         }
         return emptyList()

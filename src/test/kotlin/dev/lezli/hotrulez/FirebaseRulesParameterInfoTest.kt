@@ -104,6 +104,13 @@ class FirebaseRulesParameterInfoTest : BasePlatformTestCase() {
         assertEquals(listOf("path"), items[0].params)
     }
 
+    fun testCrossServiceFirestoreGetOffersNoSignatureInFirestoreFile() {
+        // firestore.get is a Cloud Storage cross-service helper; in a Cloud Firestore file
+        // `firestore` is not a namespace, so no signature must be offered.
+        val items = itemsAt(inDocuments("match /c/{id} { allow read: if firestore.get(<caret>) != null; }"))
+        assertNull("firestore.get offers no parameter info inside a Cloud Firestore file", items)
+    }
+
     // --- Deferred global-namespace call ----------------------------------
 
     fun testGlobalNamespaceCallOffersNoSignature() {

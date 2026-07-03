@@ -164,22 +164,24 @@ class FirebaseRulesDocumentationProvider : AbstractDocumentationProvider() {
         }
 
     /**
-     * Prose for a `member_expression`. The cross-service `firestore.get` /
-     * `firestore.exists` calls are recognised service-agnostically; every other
-     * member is validated against the detected dialect's member table before any
-     * prose is fetched, so no dialect leak and no invented member.
+     * Prose for a `member_expression`. Every member — including the cross-service
+     * `firestore.get` / `firestore.exists` calls — is validated against the detected
+     * dialect's member table *before* any prose is fetched, so nothing leaks across
+     * dialects (`firestore.*` is not a namespace in Cloud Firestore, where the member
+     * table has no `firestore` receiver) and no member is invented. `firestore.get` /
+     * `firestore.exists` are then documented as cross-service helpers rather than plain
+     * members; every other validated path draws from the member prose table.
      */
     private fun memberEntry(member: FirebaseRulesMemberExpression): FirebaseRulesDocs.Entry? {
         val memberName = member.identifier.text
         val receiverKey = FirebaseRulesMemberPath.receiverKey(member.expression)
-        if (receiverKey == "firestore" && memberName in RulesService.CROSS_SERVICE_HELPERS) {
-            return FirebaseRulesDocs.forHelper(memberName)
-        }
         val members = RulesService.membersFor(RulesService.forElement(member))
-        if (memberName in members[receiverKey].orEmpty()) {
-            return FirebaseRulesDocs.forMember(FirebaseRulesMemberPath.memberPath(member))
+        if (memberName !in members[receiverKey].orEmpty()) return null
+        return if (receiverKey == "firestore" && memberName in RulesService.CROSS_SERVICE_HELPERS) {
+            FirebaseRulesDocs.forHelper(memberName)
+        } else {
+            FirebaseRulesDocs.forMember(FirebaseRulesMemberPath.memberPath(member))
         }
-        return null
     }
 
     /**
@@ -264,9 +266,16 @@ class FirebaseRulesDocumentationProvider : AbstractDocumentationProvider() {
      * stripped and the text HTML-escaped. `null` when there is no such comment.
      */
     private fun precedingCommentHtml(declaration: PsiElement): String? {
-        var sibling = declaration.prevSibling
+        val gap = declaration.prevSibling
+        // A blank line between the declaration and the comment above detaches it: the
+        // comment is no longer immediately preceding and documents nothing here.
+        if (gap is PsiWhiteSpace && gap.text.count { it == '\n' } > 1) return null
+        var sibling = gap
         while (sibling is PsiWhiteSpace) sibling = sibling.prevSibling
         val comment = sibling ?: return null
+        // A comment that does not begin its own line is a *trailing* comment on the
+        // previous statement (`function a() {} // note`), not this declaration's doc.
+        if (!startsOwnLine(comment)) return null
         return when (comment.node.elementType) {
             FirebaseRulesTypes.BLOCK_COMMENT -> renderBlockComment(comment.text)
             FirebaseRulesTypes.LINE_COMMENT -> renderLineComments(comment)
@@ -274,11 +283,30 @@ class FirebaseRulesDocumentationProvider : AbstractDocumentationProvider() {
         }
     }
 
-    /** Collect the contiguous run of line comments ending at [last] (upward), stripped and joined. */
+    /**
+     * True when only whitespace precedes [comment] on its own source line — i.e. it is a
+     * standalone (doc) comment, not one trailing code on the same line. A comment abutted
+     * by code (`}// c`) or by inline whitespace after code (`} // c`) is trailing; one
+     * preceded by a newline-bearing whitespace run, or at the very start of the file, is not.
+     */
+    private fun startsOwnLine(comment: PsiElement): Boolean {
+        val previous = comment.prevSibling ?: return true
+        if (previous !is PsiWhiteSpace) return false
+        return previous.text.any { it == '\n' } || previous.prevSibling == null
+    }
+
+    /**
+     * Collect the contiguous run of standalone line comments ending at [last] (upward),
+     * stripped and joined. A blank line, or a line comment trailing code on its own line,
+     * ends the run — so a previous statement's trailing comment is never swept in.
+     */
     private fun renderLineComments(last: PsiElement): String {
         val lines = ArrayDeque<String>()
         var current: PsiElement? = last
-        while (current != null && current.node.elementType == FirebaseRulesTypes.LINE_COMMENT) {
+        while (current != null &&
+            current.node.elementType == FirebaseRulesTypes.LINE_COMMENT &&
+            startsOwnLine(current)
+        ) {
             lines.addFirst(current.text.removePrefix("//").trim())
             var previous = current.prevSibling
             if (previous is PsiWhiteSpace) {

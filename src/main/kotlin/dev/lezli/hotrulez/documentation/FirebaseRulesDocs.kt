@@ -605,4 +605,25 @@ object FirebaseRulesDocs {
      * *of* these namespaces are intentionally not documented here (deferred/`UNCONFIRMED`).
      */
     fun forNamespace(name: String): Entry? = NAMESPACES[name]
+
+    // --- Test-facing key views (bidirectional drift guard) ----------------------------
+    // The forward invariant (every vocabulary name has prose) is asserted by
+    // FirebaseRulesDocsTableTest; these views let the same suite assert the *reverse* —
+    // that every prose key still maps back to a live vocabulary name — so prose orphaned
+    // by a vocabulary removal or rename fails the build instead of lingering as dead text.
+
+    /** The full member paths this table documents (see [forMember]). */
+    internal val memberKeys: Set<String> get() = MEMBERS.keys
+
+    /** The `allow` operation names this table documents (see [forOperation]). */
+    internal val operationKeys: Set<String> get() = OPERATIONS.keys
+
+    /** The built-in global names this table documents (see [forGlobal]). */
+    internal val globalKeys: Set<String> get() = GLOBALS.keys
+
+    /** The path-helper names this table documents (see [forHelper]). */
+    internal val helperKeys: Set<String> get() = HELPERS.keys
+
+    /** The type / namespace names this table documents (see [forNamespace]). */
+    internal val namespaceKeys: Set<String> get() = NAMESPACES.keys
 }

@@ -101,4 +101,53 @@ class FirebaseRulesDocsTableTest : BasePlatformTestCase() {
         val offenders = RulesService.CROSS_SERVICE_HELPERS.filter { FirebaseRulesDocs.forHelper(it) == null }
         assertTrue("cross-service helpers missing FirebaseRulesDocs.forHelper prose: $offenders", offenders.isEmpty())
     }
+
+    // --- Reverse drift: every prose key maps back to a live vocabulary name ----------
+    // The tests above only guarantee vocab -> prose. Without the reverse direction a member,
+    // global, operation, helper, or namespace removed or renamed in the vocabulary tables
+    // would leave its prose orphaned (dead, unreachable) yet still green. These close that
+    // gap so the vocabulary and the prose table cannot drift apart in *either* direction.
+
+    /**
+     * Every documented member path is still composed by some dialect's member table
+     * (`receiver -> [leaf]` => `receiver.leaf`), so a member dropped/renamed in
+     * [RulesService.members] cannot leave orphaned member prose behind.
+     */
+    fun testEveryMemberProseKeyIsLive() {
+        val liveMemberPaths = RulesService.entries
+            .flatMap { service -> service.members.flatMap { (receiver, leaves) -> leaves.map { "$receiver.$it" } } }
+            .toSet()
+        val orphans = FirebaseRulesDocs.memberKeys - liveMemberPaths
+        assertTrue("FirebaseRulesDocs member prose with no live member path: $orphans", orphans.isEmpty())
+    }
+
+    /** Every documented operation is still an [FirebaseRulesBuiltins.OPERATIONS] name. */
+    fun testEveryOperationProseKeyIsLive() {
+        val orphans = FirebaseRulesDocs.operationKeys - FirebaseRulesBuiltins.OPERATIONS.toSet()
+        assertTrue("FirebaseRulesDocs operation prose with no live operation: $orphans", orphans.isEmpty())
+    }
+
+    /** Every documented global is still declared in some dialect's `globals`. */
+    fun testEveryGlobalProseKeyIsLive() {
+        val liveGlobals = RulesService.entries.flatMap { it.globals }.toSet()
+        val orphans = FirebaseRulesDocs.globalKeys - liveGlobals
+        assertTrue("FirebaseRulesDocs global prose with no live global: $orphans", orphans.isEmpty())
+    }
+
+    /**
+     * Every documented helper is still a live path helper — a bare Firestore helper or a
+     * cross-service `firestore.get`/`firestore.exists`.
+     */
+    fun testEveryHelperProseKeyIsLive() {
+        val liveHelpers = RulesService.entries.flatMap { it.bareHelpers }.toSet() + RulesService.CROSS_SERVICE_HELPERS
+        val orphans = FirebaseRulesDocs.helperKeys - liveHelpers
+        assertTrue("FirebaseRulesDocs helper prose with no live path helper: $orphans", orphans.isEmpty())
+    }
+
+    /** Every documented namespace is still a live type name (or the `debug` global). */
+    fun testEveryNamespaceProseKeyIsLive() {
+        val liveNamespaces = FirebaseRulesBuiltins.TYPE_NAMES + "debug"
+        val orphans = FirebaseRulesDocs.namespaceKeys - liveNamespaces
+        assertTrue("FirebaseRulesDocs namespace prose with no live type name: $orphans", orphans.isEmpty())
+    }
 }

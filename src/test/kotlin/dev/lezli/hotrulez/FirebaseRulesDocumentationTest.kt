@@ -98,6 +98,16 @@ class FirebaseRulesDocumentationTest : BasePlatformTestCase() {
         assertDocContains(doc, "get(path)")
     }
 
+    fun testCrossServiceFirestoreGetDoesNotLeakIntoFirestoreFile() {
+        // `firestore.get` is a Cloud Storage cross-service call; `firestore` is not a
+        // namespace in Cloud Firestore, so inside a Firestore file it must document nothing.
+        val target = builtinTarget(inCity("allow read: if firestore.g${CARET}et(/x) != null;"))
+        assertNull(
+            "firestore.get must not document inside a Cloud Firestore file",
+            provider.generateDoc(target, null),
+        )
+    }
+
     // --- user symbols ----------------------------------------------------
 
     fun testUserFunctionShowsSignatureAndPrecedingComment() {
@@ -112,6 +122,44 @@ class FirebaseRulesDocumentationTest : BasePlatformTestCase() {
         )
         assertDocContains(doc, "function isSignedIn(")
         assertDocContains(doc, "Returns true for signed-in users.")
+    }
+
+    fun testTrailingCommentOfPreviousFunctionNotAttributed() {
+        // The `// trailing note` belongs to `first`, on its own line; it must not become
+        // the doc of the next declaration just because it sits directly above it.
+        val doc = userDoc(
+            inDocuments(
+                """
+                function first() { return true; } // trailing note for first
+                function isSignedIn() { return request.auth != null; }
+                match /cities/{city} { allow read: if isSign${CARET}edIn(); }
+                """,
+            ),
+        )
+        assertDocContains(doc, "function isSignedIn(")
+        assertFalse(
+            "a previous statement's trailing comment must not document the next declaration:\n$doc",
+            doc!!.contains("trailing note"),
+        )
+    }
+
+    fun testCommentDetachedByBlankLineNotAttributed() {
+        // A blank line detaches the comment: it is no longer immediately preceding.
+        val doc = userDoc(
+            inDocuments(
+                """
+                // Detached note.
+
+                function isSignedIn() { return request.auth != null; }
+                match /cities/{city} { allow read: if isSign${CARET}edIn(); }
+                """,
+            ),
+        )
+        assertDocContains(doc, "function isSignedIn(")
+        assertFalse(
+            "a comment separated from the declaration by a blank line must not document it:\n$doc",
+            doc!!.contains("Detached note"),
+        )
     }
 
     fun testParameterShowsOwningFunction() {
