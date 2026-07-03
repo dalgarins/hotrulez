@@ -28,6 +28,17 @@
                 (<code>request</code>, <code>resource</code>), helper functions,
                 and shallow <code>request.</code>/<code>resource.</code>
                 members</li>
+            <li><b>Structure view</b> &mdash; a navigable outline of the file's
+                services, matches, functions, and <code>allow</code> rules</li>
+            <li><b>Code folding</b> for service, match, and function blocks and
+                block comments</li>
+            <li><b>Quick documentation</b> (Ctrl+Q) &mdash; doc-grounded
+                descriptions with an external Firebase link for operations,
+                built-ins, dialect-correct members, and helpers, plus signatures
+                for your own functions, parameters, <code>let</code> bindings,
+                and path variables</li>
+            <li><b>Parameter info</b> (Ctrl+P) for user-function and fixed-arity
+                path-helper calls</li>
         </ul>
         <p>
             hotrulez is purely structural: it never connects to Firebase, runs
@@ -140,5 +151,22 @@
 
         <renamePsiElementProcessor
             implementation="dev.lezli.hotrulez.refactoring.FirebaseRulesPathVariableRenameProcessor"/>
+
+        <!-- Authoring polish (v0.8): structure view, folding, quick documentation, parameter info. -->
+        <lang.psiStructureViewFactory
+            language="FirebaseRules"
+            implementationClass="dev.lezli.hotrulez.structureview.FirebaseRulesStructureViewFactory"/>
+
+        <lang.foldingBuilder
+            language="FirebaseRules"
+            implementationClass="dev.lezli.hotrulez.folding.FirebaseRulesFoldingBuilder"/>
+
+        <lang.documentationProvider
+            language="FirebaseRules"
+            implementationClass="dev.lezli.hotrulez.documentation.FirebaseRulesDocumentationProvider"/>
+
+        <codeInsight.parameterInfo
+            language="FirebaseRules"
+            implementationClass="dev.lezli.hotrulez.parameterinfo.FirebaseRulesParameterInfoHandler"/>
     </extensions>
 </idea-plugin>

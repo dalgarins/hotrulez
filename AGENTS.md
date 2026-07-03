@@ -15,6 +15,8 @@ The plugin should provide:
 - Symbol intelligence: go-to-definition, find usages, rename refactoring, and
   scope-aware code completion for functions, parameters, `let` bindings, and path
   variables (shipped in v2 / 0.5).
+- Authoring aids: a structure view, code folding, quick documentation, and
+  parameter info (shipped in v3 / 0.8).
 
 ## Documentation Workflow
 
@@ -185,6 +187,35 @@ resolve layer:
   `RenamePsiElementProcessor` that scopes path-variable rename to the binding's
   match subtree so shadowing holds.
 - `completion/` registers a position-aware `CompletionContributor`.
+
+Authoring polish (v3 / 0.8) adds four read-only code-insight surfaces, each a
+projection of the existing PSI / `RulesService` / resolver — no new semantics, no
+relaxed non-goal:
+
+- `structureview/` registers a `PsiStructureViewFactory`
+  (`lang.psiStructureViewFactory`) whose model outlines `service` → `match` →
+  `function`/`allow` from typed PSI; `let`/`return`/path variables are not
+  surfaced, and a half-typed file yields a partial (never throwing) tree.
+- `folding/` registers a `FoldingBuilderEx` (`lang.foldingBuilder`, `DumbAware`)
+  that folds `service`/`match`/`function` braced bodies and block comments,
+  guarded against unclosed/empty regions so an in-progress edit makes no bogus
+  fold.
+- `documentation/` holds `FirebaseRulesDocs` — a doc-prose table keyed off the
+  same keys as `RulesService.members` (a `FirebaseRulesDocsTableTest` asserts the
+  two can't drift) — and a `FirebaseRulesDocumentationProvider`
+  (`lang.documentationProvider`, `AbstractDocumentationProvider`) that documents
+  built-ins dialect-aware (validated against `RulesService.membersFor` before any
+  prose is fetched) and user symbols from their own signature/comment, fabricating
+  nothing.
+- `parameterinfo/` registers a `ParameterInfoHandler`
+  (`codeInsight.parameterInfo`) for user-function and fixed-arity path-helper
+  calls; it never validates arity.
+
+The shared member-path key logic lives in `references/FirebaseRulesMemberPath`
+(extracted from the completion contributor so it and quick-docs share one
+implementation). Add focused tests in `FirebaseRulesStructureViewTest`,
+`FirebaseRulesFoldingTest`, `FirebaseRulesDocumentationTest`,
+`FirebaseRulesParameterInfoTest`, and `FirebaseRulesDocsTableTest`.
 
 When a grammar change is needed to expose a PSI accessor or a named-element
 interface, make the narrowest `.bnf` change, re-run
