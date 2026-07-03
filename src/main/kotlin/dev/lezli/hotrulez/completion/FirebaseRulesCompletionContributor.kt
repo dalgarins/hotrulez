@@ -6,7 +6,6 @@ import com.intellij.codeInsight.completion.CompletionProvider
 import com.intellij.codeInsight.completion.CompletionResultSet
 import com.intellij.codeInsight.completion.CompletionType
 import com.intellij.codeInsight.lookup.LookupElementBuilder
-import com.intellij.lang.ASTNode
 import com.intellij.patterns.PlatformPatterns
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiWhiteSpace
@@ -29,6 +28,7 @@ import dev.lezli.hotrulez.psi.FirebaseRulesPathWildcard
 import dev.lezli.hotrulez.psi.FirebaseRulesRecursiveWildcard
 import dev.lezli.hotrulez.psi.FirebaseRulesTypes as T
 import dev.lezli.hotrulez.references.FirebaseRulesBuiltins
+import dev.lezli.hotrulez.references.FirebaseRulesMemberPath
 import dev.lezli.hotrulez.references.FirebaseRulesNamedElement
 import dev.lezli.hotrulez.references.FirebaseRulesScopes
 import dev.lezli.hotrulez.references.RulesService
@@ -123,26 +123,7 @@ class FirebaseRulesCompletionContributor : CompletionContributor() {
 private fun addMembers(position: PsiElement, result: CompletionResultSet) {
     val member = PsiTreeUtil.getParentOfType(position, FirebaseRulesMemberExpression::class.java) ?: return
     val members = RulesService.membersFor(RulesService.forElement(position))
-    members[receiverKey(member.expression)]?.let { addKeywords(result, it, "member") }
-}
-
-/**
- * The lookup key for a member receiver, assembled from its identifier and `.` leaves only.
- * Built from tokens (not raw text) so interleaved whitespace or comments — e.g.
- * `request /* x */ .auth` — still map to `request.auth`.
- */
-private fun receiverKey(receiver: PsiElement): String {
-    val builder = StringBuilder()
-    fun collect(node: ASTNode) {
-        val children = node.getChildren(null)
-        if (children.isEmpty()) {
-            if (node.elementType == T.IDENTIFIER || node.elementType == T.DOT) builder.append(node.text)
-        } else {
-            children.forEach(::collect)
-        }
-    }
-    collect(receiver.node)
-    return builder.toString()
+    members[FirebaseRulesMemberPath.receiverKey(member.expression)]?.let { addKeywords(result, it, "member") }
 }
 
 private fun addExpressionSymbols(position: PsiElement, result: CompletionResultSet) {
