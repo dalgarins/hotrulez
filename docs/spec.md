@@ -1,436 +1,331 @@
-# HotRulez Project Spec — 0.8 (Authoring Polish)
+# HotRulez Project Spec — m5 (Toward Semantics)
 
-Status: draft
-Last updated: 2026-07-03
-Program: continues the **v3 "Assisted Authoring"** arc (0.7 / 0.8 / 0.9).
-Supersedes: `docs/v3/spec.md` (archived — the Assisted Authoring plan as it stood
-while 0.7 was active; **0.7 shipped**). This document promotes **0.8 (Authoring
-Polish)** from the forward sketch in that plan to full implementation detail, and
-carries **0.9 (Toward Semantics)** forward as a lightly-sketched direction. The v2
-spec (symbol intelligence 0.5.0, Cloud Storage 0.6.0) is under `docs/v2/`; the v1
-milestone under `docs/v1/`.
+Status: **committed plan.** Promoted from sketch on 2026-07-05 after a doc-grounded
+false-positive-risk assessment (see Evidence). m5 is the third and final milestone
+of the Assisted Authoring arc (m3 / m4 / m5).
+Last updated: 2026-07-05.
+Supersedes: `docs/m4/spec.md` (the m4 "Authoring Polish" plan; **m4 shipped**).
+Earlier milestones live under `docs/m3/` (Actionable Diagnostics), `docs/m2/`
+(Symbol Intelligence + Cloud Storage), and `docs/m1/` (Passive Language).
 
 ## Context
 
 HotRulez is a JetBrains IDE plugin for Firebase Security Rules — both Cloud
 Firestore (`service cloud.firestore`) and Cloud Storage (`service
-firebase.storage`) `.rules` files. Through the Assisted Authoring arc it has
-grown from a passive language into an active assistant:
+firebase.storage`) `.rules` files. Through the Assisted Authoring arc it has grown
+to **read**, **understand**, **act on**, and **explain** a `.rules` file:
 
-- **v1 (→ 0.4.0)** — passive language: file recognition, syntax highlighting, a
-  Grammar-Kit/JFlex parser and typed PSI, a PSI-aware formatter, structural
-  diagnostics (an always-on annotator plus two configurable inspections), and
-  editor polish (icon, color settings page, brace matcher, quote handler,
-  commenter).
-- **v2 (0.5.0)** — symbol intelligence: a PSI reference/resolve layer honoring
-  Firebase Rules scoping and path-variable shadowing, plus go-to-definition,
-  find-usages, rename, and scope-aware completion.
-- **v2 (0.6.0)** — Cloud Storage as a sibling dialect, detected from the
-  `service` declaration and modeled as data in `RulesService`.
-- **v3 (0.7.0) — Actionable Diagnostics** *(shipped)*: 12 quick-fixes (as
-  `ModCommand` `PsiUpdateModCommandAction`s serving both inspections and the
-  annotator) for the structural diagnostics, plus a new
-  `FirebaseRulesSymbolInspection` that flags undefined references and unused
-  functions / `let`s / parameters through the shipped resolver.
+- **m1** — passive language (file type, highlighting, parser/PSI,
+  formatter, structural diagnostics, editor polish).
+- **m2** — symbol intelligence (resolve, go-to-definition, find-usages,
+  rename, scope-aware completion).
+- **m2** — Cloud Storage as a sibling dialect, modeled as data in
+  `RulesService`.
+- **m3** — Actionable Diagnostics: 12 `ModCommand` quick-fixes plus
+  `FirebaseRulesSymbolInspection` (undefined references, unused
+  functions/`let`s/parameters through the shipped resolver).
+- **m4** — Authoring Polish: structure view, code folding, quick
+  documentation, parameter info, and the `FirebaseRulesDocs` doc-prose table.
 
-The plugin now **reads** a `.rules` file, **understands** its symbols, and
-**acts** on structural problems. What it does not yet do is help a developer
-**see and move through** a file's structure the way a first-class language plugin
-does: there is no structure view, no folding, no hover documentation, and no
-parameter hints. Every input for those features already exists — the typed PSI
-(service / match / function / allow tree), the `RulesService` dialect profile,
-the `FirebaseRulesBuiltins` vocabulary, and the resolver — but none of it is yet
-surfaced as a navigable or explanatory view.
-
-0.8 closes that gap. Where 0.7 was *"the IDE fixes your rules,"* 0.8 is *"the IDE
-shows you your rules."*
+Every diagnostic the plugin ships today is **structural** — does this brace close,
+does this symbol resolve, is this declaration used. None is **semantic** — none
+asks whether a member can exist on a receiver. m5 takes the first careful step
+across that line, and *only* the first.
 
 ## Thesis
 
-**0.8 adds the read-only authoring surfaces a mature language plugin is expected
-to have — structure view, code folding, quick documentation, and parameter
-info — each a projection of PSI and data the plugin already owns, adding no new
-semantics and relaxing no v1/v2/0.7 non-goal.** Three of the four features are
-pure views over existing structures; the fourth (quick documentation) requires
-one genuinely new artifact — a doc-*prose* table — because today's tables carry
-symbol *names* but no descriptions.
+**m5 adds one conservative, doc-grounded semantic check — a service-aware
+inspection that flags a member access on a *closed* built-in receiver when the
+member is not part of that receiver's fixed, documented set — extending the
+`FirebaseRulesSymbolInspection` philosophy (resolve against a fixed model, never
+invent) from undefined *references* to unknown *members*, while relaxing no prior
+non-goal.** It infers no types, evaluates no authorization, and flags nothing whose
+receiver is an open (user-data / custom-claim / metadata) namespace.
 
-## Anchors
+This scope was chosen empirically: a simulation of the check over the repo's entire
+member-access corpus produced **0 false positives and 3 true positives**, and an
+adversarial doc review pinned down exactly which receivers are safe to close (see
+Evidence). The one candidate that could not be grounded in the docs — an
+operator/literal-type check — is **deferred** (see Candidate B).
 
-- **First-principles parity with mature JetBrains language plugins.** The bar is
-  "what the Kotlin, Go, and Rust plugins do." A structure view, code folding,
-  quick documentation, and parameter info are all table stakes for a first-class
-  language, and all are still missing here. Scope is chosen by platform
-  convention, not telemetry.
-- **Read-only projections, no new semantics.** Structure view, folding, and
-  parameter info render PSI/data the plugin already computes. Quick documentation
-  adds *prose* but no *inference*: it explains the fixed, doc-sourced vocabulary
-  and shows a user symbol's own signature/comment — it never derives a type or a
-  value.
-- **Hold every prior non-goal.** 0.8 adds no connection to Firebase, no
-  evaluation of authorization, no runtime model, and no type inference. See
-  Non-Goals.
-- **Doc strings are doc-grounded and structural.** Every description shown on
-  hover comes from official Firebase reference docs (or is the user's own
-  comment). Anything not directly confirmed is tagged `UNCONFIRMED` with a TODO
-  tied to its source, matching the `.bnf`/`RulesService` convention.
+## The check — `FirebaseRulesMemberInspection`
+
+A new `LocalInspectionTool` (`dev.lezli.hotrulez.diagnostics.FirebaseRulesMemberInspection`),
+registered as a `localInspection` with its own toggle, `enabledByDefault="true"`,
+`level="WEAK WARNING"`. It is a distinct concern from the resolver-based
+`FirebaseRulesSymbolInspection` (member validity is table-based, not scope-based),
+so it is a separate inspection, not an extension of that one.
+
+### What it flags
+
+A `member_expression` `<receiver>.<member>` is flagged **iff all** of:
+
+1. the file's dialect is **known** (`RulesService.forFile` / `forElement` returns a
+   service — see Neutral files);
+2. `receiverKey(receiver)` (the shared `FirebaseRulesMemberPath.receiverKey` logic)
+   is a **closed receiver** in that dialect's flag-authority model;
+3. `member` is **not** in that closed receiver's complete member set;
+4. **no hop** in the receiver chain is an **open** receiver (short-circuit — see
+   below).
+
+Anything else is silent. In particular a member on an unknown/user receiver, a call
+result, a slice, or any open namespace is never flagged.
+
+### The closed-receiver model (flag authority)
+
+This is a **new, explicit, per-dialect table** — the *flag authority* — kept
+separate from `RulesService.members` (the *completion* source), because the two
+genuinely diverge: `request.auth.token` belongs in completion (standard claims are
+useful hints) but must be **open** for flagging (custom claims are unbounded); and
+`request.query` is a valid closed receiver to flag against but is not a completion
+member today. A drift-guard test keeps the flag model doc-consistent, mirroring the
+m4 `FirebaseRulesDocsTableTest` pattern.
+
+**Cloud Firestore — closed receivers (safe to flag unknown members):**
+
+| Receiver | Complete member set | Source |
+| --- | --- | --- |
+| `request` | `auth, method, path, query, resource, time` | `rules.firestore.Request` (exhaustive; **no `params`**) |
+| `request.auth` | `uid, token` | `rules.firestore.Request` / rules-and-auth |
+| `resource` | `data, id, __name__` | `rules.firestore.Resource` |
+| `request.resource` | `data, id, __name__` | same `Resource` type |
+| `request.query` | `limit, offset, orderBy` | `rules.firestore.Request` (docs use "e.g." phrasing → treat as closed but this receiver only, tag `UNCONFIRMED` on exhaustiveness) |
+
+**Cloud Storage — closed receivers:**
+
+| Receiver | Complete member set | Source |
+| --- | --- | --- |
+| `request` | `auth, params, path, resource, time` | storage rules-conditions (**no `method`, no `query`**) |
+| `request.auth` | `uid, token` | rules-and-auth |
+| `resource` | `name, bucket, generation, metageneration, size, timeCreated, updated, md5Hash, crc32c, etag, contentDisposition, contentEncoding, contentLanguage, contentType, metadata` | storage rules-conditions / reference |
+| `request.resource` | `name, bucket, size, md5Hash, crc32c, contentDisposition, contentEncoding, contentLanguage, contentType, metadata` | `resource` minus `{generation, metageneration, etag, timeCreated, updated}` (deliberately the *larger* of two conflicting doc sources, so the check never false-flags `md5Hash`/`crc32c`/`content*`) |
+
+### Open receivers (NEVER flag — the short-circuit)
+
+The moment any hop in the receiver chain matches an open receiver, the inspection
+returns without flagging. These are app / JWT / query schema the engine cannot know:
+
+- `request.auth.token` **(both dialects)** — developer-defined custom claims via
+  `setCustomUserClaims` are unbounded (`request.auth.token.admin`, `.reader`).
+- `request.auth.token.firebase` **(both dialects)** — **not** exhaustive: the
+  Firebase `DecodedIdToken.firebase` reserved claim carries `sign_in_second_factor`,
+  `second_factor_identifier` (MFA), SAML's `sign_in_attributes`, and a literal open
+  index signature `[key: string]: any`. Idiomatic MFA/SAML rules
+  (`request.auth.token.firebase.sign_in_second_factor == 'phone'`) must not be
+  flagged. *(This was the decisive catch from the adversarial pass.)*
+- `request.auth.token.firebase.identities` — keyed by sign-in provider (unbounded).
+- Firestore `resource.data`, `request.resource.data` — user document fields.
+- Cloud Storage `resource.metadata`, `request.resource.metadata` — custom object
+  metadata.
+- Cloud Storage `request.params` — request/API-dependent query-parameter keys.
+
+The closed member sets stop exactly one level above these; the shallow `members`
+table (m2) already stops there, and the new flag model keeps the same discipline.
+
+### Service-scoping is load-bearing
+
+Closed sets are **per service**. This is not an optimization — it is where the
+check's value comes from: `resource.size` in a Firestore file and `request.method`
+in a Storage file are **true positives** *because* the sets are dialect-scoped
+(`size` is Storage-only; `method` is Firestore-only). The inspection MUST resolve
+`RulesService.forFile` and use that dialect's set — never a global merge.
+
+### Severity, quick-fix, neutral files
+
+- **Severity: `WEAK WARNING`, on by default.** The docs document which members
+  *exist* but never state that accessing an undefined member is a hard deploy-time
+  error (it surfaces as a runtime evaluation error that denies the request), and two
+  receivers carry mild residual uncertainty (`request.auth` is typed as a generic
+  `Map`; `request.query` membership uses "e.g." phrasing). Weak-warning is the
+  reputation-safe altitude for the plugin's first semantic check. Leave headroom to
+  escalate the four fully-documented interfaces (`request`, `resource`,
+  `request.resource`, `request.auth`) to `WARNING` in a later release; keep
+  `request.query` at weak-warning regardless.
+- **Quick-fix (continues the m3 Actionable Diagnostics theme):** on a flagged
+  member, compute edit distance to the receiver's known members; when a close match
+  exists (Levenshtein ≤ 2) offer a `ModCommand` rename fix — *"Did you mean 'X'?"*
+  (`request.resourse` → `resource`, `resource.dta` → `data`,
+  `request.query.limitt` → `limit`). For cross-dialect true positives with no close
+  in-dialect match, prefer a **dialect-aware message** over a rename — e.g. Storage
+  `request.method` → *"'method' is not a member of request in Cloud Storage rules;
+  the operation is expressed by the match (get/list/create/update/delete)"*;
+  Firestore `resource.size` → *"'size' is a Cloud Storage member; Firestore
+  `resource` exposes {data, id, __name__}"*. No fix when there is no near match —
+  just the warning.
+- **Neutral files: suppress.** When `RulesService.forFile` returns null (no
+  recognized `service` — an incomplete/fragment/parse-broken file), the flag does
+  **not** run. Unioning both dialects' member sets would accept a Storage-only
+  member in a would-be-Firestore file, destroying the cross-dialect true positives.
+  Completion continues to union (harmless for suggestions), unchanged.
+
+## Prerequisite table fixes (correctness — must land before the check ships)
+
+These are not preferences; the check is unsafe without them. All were identified by
+the grounding assessment.
+
+1. **Introduce the explicit closed-receiver flag authority** (above), separate from
+   `members`. The inspection flags only against this allowlist — never against
+   "every key present in `members`."
+2. **Mark `request.auth.token` open** in both dialects. It is a `members` key today
+   with six standard claims; keep those as completion hints, but the flag model must
+   never treat it as closed — custom claims are unbounded. *(This is the single
+   largest false-positive risk in the current table, and the 0-FP simulation already
+   assumed this fix.)*
+3. **Never close `request.auth.token.firebase`.** It is absent from the table today
+   (already open); keep it that way. Optionally add `{identities, sign_in_provider,
+   sign_in_second_factor, second_factor_identifier, sign_in_attributes, tenant}` as
+   completion hints only.
+4. **Remove `params` from the Firestore `request` set** in `RulesService.members`.
+   Firestore has no `request.params` (path wildcards bind as named variables:
+   `match /users/{userId}` → `userId`). Keeping it both mis-suggests in Firestore
+   completion and would make the flag silently accept `request.params.*`. Leave the
+   **Storage** `request.params` entry intact (valid there, and itself open).
+
+## Evidence (why this scope is safe to ship)
+
+A background grounding workflow (doc research → table cross-check → corpus
+simulation → adversarial verification → synthesis) established:
+
+- **0 false positives / 3 true positives** simulating the service-aware check over
+  the 203 concrete member-access sites in the repo. The three flags: `request.foo`
+  (the intentional bad-member fixture), `resource.size` in a Firestore file, and
+  `request.method` in a Storage file — all genuine. The "short-circuit on any open
+  receiver" rule neutralized every trap (`resource.data.*`, custom claims, slices,
+  `.diff(...).addedKeys()...` chains).
+- **Adversarial refutation** found the `request.auth.token.firebase` MFA/SAML
+  members and its open index signature, which is why that receiver is hard-forbidden
+  from ever being closed. No valid-but-unlisted member survived on `request`,
+  `resource`, `request.resource`, `request.auth`, or `request.query`.
+- **Caveat honestly recorded:** the corpus is synthetic (there are no real
+  application `.rules` files in the repo — every `.rules` file is a formatter
+  fixture). The 0-FP result is a floor, not proof; weak-warning severity and the
+  conservative closed set are the hedge against real-world receivers the corpus
+  under-exercises.
+
+## Candidate B — deferred (operator / literal-type check)
+
+A check for an operator applied to plainly incompatible **literal** operands
+(`"x" / 2`, `true && 1`) was considered and **deferred**. It is technically
+feasible literals-only with zero type inference, but:
+
+- its grounding is **inference-by-omission** — the docs enumerate which operators
+  each type *supports* but never state that a bad combination is an *error*, which
+  conflicts with the plugin's standing "doc-grounded — never assert what the docs
+  don't confirm" anchor (every check today can cite a doc sentence; this one cannot);
+- its **real-world hit rate is near-zero** — nobody writes `true + 1`; every genuine
+  operator bug is on a variable/member/call whose type must be **inferred** (out of
+  scope).
+
+Revisit B when a real type-inference pass exists (a later Toward Semantics
+increment), where the same operator rules become genuinely useful *and* each flag
+can cite an inferred type.
 
 ## Non-Goals
 
-0.8 inherits every v1/v2/0.7 non-goal unchanged. The plugin must not:
+m5 inherits **every** m1/m2/m3/m4 non-goal unchanged (no authorization
+evaluation; no Firebase/emulator/rules-test-SDK connection; no project IDs; not
+modeled as JavaScript/JSON; no unrelated UI deps). Additionally, m5-specific:
 
-- Evaluate whether a request is allowed or denied, or infer authorization or
-  security quality.
-- Connect to Firebase projects, emulators, the rules-test SDK, credentials, or
-  live data, or run rules tests in-IDE.
-- Hard-code Firebase project IDs or environment-specific paths.
-- Model the language as JavaScript, JSON, or generic configuration.
-- Replace official Firebase tooling for deployment or authorization testing.
-- Add web-app frameworks or unrelated UI dependencies.
+- **No type inference.** The member check is a fixed, doc-sourced closed-set lookup;
+  it never derives the type of a variable, member, call result, or user value.
+- **No flagging of open namespaces.** `request.auth.token.*` (incl. `.firebase.*`
+  and `.identities.*`), `*.data.*`, Storage `resource.metadata.*` /
+  `request.resource.metadata.*`, and Storage `request.params.*` are never flagged,
+  by construction (the short-circuit).
+- **No global (dialect-blind) member set.** Neutral files suppress the flag; there
+  is no union fallback for flagging.
+- **No security or authorization judgment.** The wording stays structural
+  ("'x' is not a member of `request`"), never "insecure" / "authorizes".
 
-Additionally, 0.8-specific non-goals:
+## Anchors
 
-- **No type inference (still).** Quick documentation for a member (`request.auth`)
-  is looked up in the fixed, per-dialect member table — it is *not* computed from
-  a type of the receiver. `request.foo` (an unknown member) gets no doc, and the
-  feature never invents a custom `request.auth.token` claim. Parameter info shows
-  a *declared* or *fixed* signature; it never infers argument types.
-- **Parameter info does not validate arity.** It is a display aid only. Whether a
-  call has the wrong number of arguments is a diagnostic concern — and helper-call
-  arity is already on 0.7's *deliberately-no-fix* list. 0.8 must not turn
-  parameter info into a silent arity checker.
-- **Structure view and folding are non-authoritative navigational aids.** They
-  degrade gracefully on malformed files and never suppress or alter diagnostics.
-- **Documentation is not a substitute for the Firebase docs.** Hover prose is a
-  short, doc-grounded summary plus an external link; it does not reproduce or
-  replace the official reference.
+- **Conservative to a fault** — a false positive on valid, idiomatic rules is worse
+  than a missed true positive; when the docs don't make a member unambiguously
+  absent, stay silent.
+- **Doc-grounded, no inference** — every flag traces to a fixed, doc-sourced closed
+  set; anything the docs leave uncertain (`request.query` exhaustiveness) is tagged
+  `UNCONFIRMED` and kept at weak-warning.
+- **Reuse, don't rebuild** — `FirebaseRulesMemberPath.receiverKey`,
+  `RulesService.forFile`/`forElement`, the `member_expression` PSI, and the m3
+  `ModCommand` (`PsiUpdateModCommandAction`) quick-fix pattern already ship.
+- **Dialect-correct or silent** — service-scoped closed sets; neutral files suppress.
 
-## Documentation Sources
+## Implementation components
 
-Per the standing ground rule, official Firebase docs are authoritative for
-language semantics and current IntelliJ Platform SDK docs (via Context7) are
-authoritative for extension points. Re-check the relevant pages before
-implementing; do not encode a member, signature, or description the docs do not
-confirm; tag anything uncertain `UNCONFIRMED` with a TODO tied to the source.
+- `references/FirebaseRulesService.kt` — add the explicit per-dialect
+  **closed-receiver flag model** (e.g. `closedReceivers: Map<String, Set<String>>`),
+  distinct from `members`; apply the four prerequisite table fixes.
+- `diagnostics/FirebaseRulesMemberInspection.kt` — the new `LocalInspectionTool`:
+  walk `member_expression`s, resolve dialect via `RulesService.forElement`, apply the
+  flag rule + open-receiver short-circuit, register `WEAK WARNING` problems with the
+  quick-fix.
+- `diagnostics/fixes/` — a `RenameMemberFix` (`PsiUpdateModCommandAction`) for the
+  did-you-mean case (reuse `asQuickFix`); dialect-aware messages are inspection
+  message text, not fixes.
+- `plugin.xml` — register the `localInspection` (shortName `FirebaseRulesMember`,
+  groupName "Firebase Rules", `enabledByDefault="true"`, `level="WEAK WARNING"`).
+- Reuse — do not duplicate — `receiverKey`, dialect detection, and the fix plumbing.
+  A drift-guard test keeps the closed model doc-consistent.
 
-Firebase semantics load-bearing for 0.8 (already confirmed for v2/0.7; re-confirm
-the specific facts the doc table relies on before coding):
+## Tests
 
-- Rules structure and the per-service root match:
-  `https://firebase.google.com/docs/firestore/security/rules-structure`
-- Rules language (functions, `let`, scoping):
-  `https://firebase.google.com/docs/rules/rules-language`
-- Conditions, `request`/`resource`, helper calls (`get`/`exists`/…):
-  `https://firebase.google.com/docs/firestore/security/rules-conditions`
-- `request`/`resource` member reference (the member-table + doc-prose source):
-  `https://firebase.google.com/docs/reference/rules/rules.firestore.Request`
-- Storage `resource`/`request.resource` metadata:
-  `https://firebase.google.com/docs/reference/rules/rules.storage`
+- **`FirebaseRulesMemberInspectionTest`** — true positives: `request.foo`
+  (Firestore), `resource.size` in a Firestore file, `request.method` in a Storage
+  file, `request.resourse` (typo → did-you-mean `resource`). **Guaranteed
+  negatives** (the critical set): `resource.data.<field>`,
+  `request.resource.data.<field>`, `request.auth.token.<customClaim>`,
+  `request.auth.token.firebase.sign_in_second_factor`,
+  `request.auth.token.firebase.<x>`, Storage `resource.metadata.<key>`,
+  Storage `request.params.<key>`; a valid member on every closed receiver in both
+  dialects; a neutral (no-`service`) file flags nothing; a malformed file throws
+  nothing.
+- **Quick-fix test** — did-you-mean rename applies and produces valid text;
+  cross-dialect message present with no rename when no near match.
+- **Drift-guard test** — the closed-receiver flag model stays consistent with the
+  documented sets and with `members` where they overlap; `request.auth.token` and
+  `request.auth.token.firebase` are asserted **open**.
+- `./gradlew test` green; `verifyPlugin` green (a new stable `localInspection` EP).
 
-IntelliJ Platform SDK extension points for 0.8 (platform target: **IntelliJ IDEA
-2025.2**, `sinceBuild = 252`, Java 21). Confirmed against the current SDK docs on
-2026-07-03; re-confirm class/method signatures before coding:
+## Acceptance
 
-- **Structure view** — `lang.psiStructureViewFactory` →
-  `PsiStructureViewFactory` returning a `StructureViewModel`
-  (`StructureViewModelBase`) built from `StructureViewTreeElement` nodes.
-- **Code folding** — `lang.foldingBuilder` → `FoldingBuilderEx` (implement
-  `DumbAware`) emitting `FoldingDescriptor`s.
-- **Quick documentation** — `lang.documentationProvider` →
-  `AbstractDocumentationProvider`. The SDK docs explicitly note that for
-  custom-language development, extending `AbstractDocumentationProvider` via the
-  language-scoped `lang.documentationProvider` EP is *generally preferred*; the
-  newer 2023.1+ Documentation Target API (`DocumentationTargetProvider` /
-  `PsiDocumentationTargetProvider`) is the forward-looking alternative but is not
-  required on 2025.2 and is heavier for this use. **Decision: use the classic
-  `AbstractDocumentationProvider`**, consistent with the plugin's other `lang.*`
-  extension points. Re-evaluate only if a platform deprecation forces it.
-- **Parameter info** — `codeInsight.parameterInfo` → `ParameterInfoHandler`.
-
-Prefer extension points over startup code (as every prior milestone did).
-
-## 0.8 Milestone Detail
-
-Four features. Three are read-only projections of existing PSI/data; the fourth
-adds a doc-prose table. Each lists the PSI it consumes (all already generated by
-the grammar), the extension point, and the behavior.
-
-### Shared: a doc-prose source (`FirebaseRulesDocs`)
-
-Today's tables give the plugin its *vocabulary* but not its *prose*:
-`RulesService.members` / `.globals` / `.bareHelpers` and
-`FirebaseRulesBuiltins.OPERATIONS` / `.GLOBALS` / `.TYPE_NAMES` are lists of
-**names**. Quick documentation needs a short description per name. Rather than
-bloat the name-tables (which are also consumed by completion, the highlighter,
-and the resolver), 0.8 adds a dedicated, doc-sourced prose table:
-
-- New `dev.lezli.hotrulez.documentation.FirebaseRulesDocs` — a static object
-  mapping each documentable entity to `(title, summaryHtml, docUrl)`:
-  - **`allow` operations** keyed by name (`get`, `list`, `read`, `create`,
-    `update`, `delete`, `write`), including the "`list` requires
-    `rules_version = '2'`" note and what each granular op expands from
-    `read`/`write`.
-  - **Built-in globals** keyed by name (`request`, `resource`, and Storage's
-    `firestore` cross-service namespace).
-  - **Members** keyed by the same whitespace-stripped receiver path
-    `RulesService.members` uses (`request.auth`, `request.auth.uid`,
-    `request.time`, `resource.data`, Storage `resource.size`, …), split by
-    dialect where the two differ.
-  - **Path helpers** keyed by name (`get`, `exists`, `getAfter`, `existsAfter`,
-    and cross-service `firestore.get` / `firestore.exists`) — one-line purpose +
-    the `path` signature.
-  - **Type/global namespaces & conversion functions** from
-    `FirebaseRulesBuiltins.TYPE_NAMES` / `GLOBALS` (`math`, `timestamp`,
-    `duration`, `int`, `string`, `debug`, …) — a brief "what it is" line. Members
-    *of* these namespaces (`math.abs`, `timestamp.date`) are **not** enumerated in
-    0.8 (arity/return unconfirmed as a table) and are tagged `UNCONFIRMED` /
-    deferred.
-- The table is the **single source of doc prose**, reused by quick documentation
-  (below) and available to parameter info for helper summaries. Every entry cites
-  its Firebase doc page; unconfirmed prose is tagged `UNCONFIRMED` with a TODO.
-- Lookups are keyed off the *same* keys `RulesService` already uses, so the
-  vocabulary and its prose cannot silently drift: a member present in the name
-  table but missing prose is a visible gap (test-asserted), not a crash.
-
-### Feature 1 — Structure view
-
-- **EP:** `lang.psiStructureViewFactory` → `FirebaseRulesStructureViewFactory`
-  (package `dev.lezli.hotrulez.structureview`), returning a
-  `FirebaseRulesStructureViewModel` (`StructureViewModelBase`, root element the
-  `FirebaseRulesFile`) over `FirebaseRulesStructureViewElement`
-  (`StructureViewTreeElement` + `NavigatablePsiElement`).
-- **Tree shape** (source order by default): `service` → nested `match` (labeled by
-  its path) → `function` / `allow`, with `match`/`function` also recognized at
-  file top level (the grammar permits both), and `function`s nested inside `match`
-  blocks. Children are computed from the typed PSI:
-  - `FirebaseRulesServiceDeclaration` → its `FirebaseRulesBlock` children
-    (`FirebaseRulesMatchDeclaration`, `FirebaseRulesAllowStatement`,
-    `FirebaseRulesFunctionDeclaration`).
-  - `FirebaseRulesMatchDeclaration` → its block's matches / allows / functions.
-  - `FirebaseRulesFunctionDeclaration` and `FirebaseRulesAllowStatement` are
-    leaves.
-- **Presentation:**
-  - service → the service name text (`FirebaseRulesServiceDeclaration.serviceName`).
-  - match → the match path text (`FirebaseRulesMatchDeclaration.matchPath`).
-  - function → `name(param, …)` from the declaration's `FirebaseRulesParameter`
-    list (reusing the named-element `name`).
-  - allow → the operation list (`FirebaseRulesMethodList` text), e.g.
-    `allow read, write`.
-  - Icons: reuse platform `AllIcons.Nodes.*` (e.g. a class-like icon for
-    service/match containers, a method icon for `function`, a property/field icon
-    for `allow`) — no new icon assets. `let`/`return`/path variables are **not**
-    surfaced (structure view shows navigable *structure*, not every statement).
-- **Behavior:** standard `Sorters.ALPHA_SORTER` offered (source order default);
-  `getSuitableClasses` wired so the navigation bar and "select in structure view"
-  work. Fully null-safe so a partially-parsed file yields a partial tree, never an
-  exception.
-
-### Feature 2 — Code folding
-
-- **EP:** `lang.foldingBuilder` → `FirebaseRulesFoldingBuilder`
-  (`FoldingBuilderEx`, `DumbAware`; package `dev.lezli.hotrulez.folding`).
-- **Foldable regions** (each a `FoldingDescriptor` over the node's braced range):
-  - the `FirebaseRulesBlock` of a `service` and of a `match`,
-  - the `FirebaseRulesFunctionBody` of a `function`,
-  - `BLOCK_COMMENT` tokens (`/* … */`).
-  The fold spans only the braces `{ … }` (not the `service …` / `match /path` head),
-  so the service name and match path stay visible on the collapsed line — which is
-  exactly the "sensible placeholder" the head already provides.
-- **Placeholder text:** `{…}` for braced blocks; `/*…*/` for block comments.
-- **Collapsed by default:** nothing (`isCollapsedByDefault` returns `false` for all
-  regions) — folding is opt-in, matching how most language plugins ship.
-- Guarded against unclosed/malformed blocks: a region is emitted only when the
-  block has both braces and a non-empty interior, so an in-progress edit never
-  produces a bogus or zero-length fold.
-
-### Feature 3 — Quick documentation
-
-- **EP:** `lang.documentationProvider` → `FirebaseRulesDocumentationProvider`
-  (`AbstractDocumentationProvider`; package `dev.lezli.hotrulez.documentation`).
-- **Targets and content** (assembled with `DocumentationMarkup` DEFINITION /
-  CONTENT sections):
-  - **User symbols** (resolved via the shipped resolver / `FirebaseRulesNamedElement`):
-    - `function` → signature `function name(params)` + any immediately-preceding
-      line/block comment as the doc body (the user's own words — doc-grounded by
-      definition), like Kotlin/Java show KDoc/JavaDoc.
-    - `parameter` → `parameter 'x' of function f`.
-    - `let` → `let x = <expr>` (the binding's own text).
-    - path / recursive wildcard → `path variable 'x' captured by match /…`.
-  - **Built-in vocabulary** (from `FirebaseRulesDocs`, dialect-aware via
-    `RulesService.forElement`):
-    - `allow` operation on a `FirebaseRulesMethodList` identifier.
-    - built-in global (`request` / `resource` / `firestore`) in
-      `reference_expression` position.
-    - member on a `FirebaseRulesMemberExpression` — keyed by the receiver path
-      (reusing `completion`'s `receiverKey` logic) so `request.auth` and
-      `resource.data` resolve to their prose; an unknown member yields no doc (no
-      type invention).
-    - path helper / cross-service helper on a call callee.
-    - type/global namespace or conversion function.
-  - **External link:** `getUrlFor` returns the entity's Firebase docs URL from
-    `FirebaseRulesDocs`, enabling "open in browser" from the doc popup.
-- **Doc-target resolution:** `getCustomDocumentationElement` / `getDocumentationElementForLookupItem`
-  so hover works on member identifiers and on completion lookup items, not only on
-  fully-resolved references.
-- No doc is fabricated: if a name is neither a resolvable user symbol nor a
-  tabled built-in, the provider returns `null` and the platform shows nothing.
-
-### Feature 4 — Parameter info
-
-- **EP:** `codeInsight.parameterInfo` → `FirebaseRulesParameterInfoHandler`
-  (`ParameterInfoHandler<FirebaseRulesArgumentList, ‹SignatureModel›>`; package
-  `dev.lezli.hotrulez.parameterinfo`).
-- **Where it triggers:** inside the `FirebaseRulesArgumentList` of a
-  `FirebaseRulesCallExpression`. The callee is the call's `expression`:
-  - a `reference_expression` resolving to a `FirebaseRulesFunctionDeclaration`
-    (a user function) → parameter names from its `FirebaseRulesParameter` list;
-  - a bare path helper (`get` / `exists` / `getAfter` / `existsAfter` — from
-    `RulesService.bareHelpersFor`) → a single `path` parameter;
-  - a `member_expression` whose text is `firestore.get` / `firestore.exists`
-    (`RulesService.CROSS_SERVICE_HELPERS`) → a single `path` parameter.
-- **UI:** show the signature; **highlight the current parameter** by counting
-  commas between `(` and the caret against the parameter list (`updateParameterInfo`
-  → `updateUI` with the current index). Helper signatures may append the one-line
-  purpose from `FirebaseRulesDocs`.
-- **Explicitly out of scope for 0.8:** global-namespace functions (`math.abs`,
-  `timestamp.date`, conversion functions) — their arities/returns are not a
-  confirmed table; documented as deferred, not silently omitted. **No arity
-  validation** (display only; see Non-Goals).
-
-### Confirmed semantics the features must honor
-
-- **Dialect-awareness:** documentation and parameter info for members/helpers must
-  key on `RulesService.forElement(...)` so Firestore vs Storage members, and
-  Firestore's bare helpers vs Storage's `firestore.*` helpers, are correct; neutral
-  files (no recognized `service`) fall back to the union, exactly as completion
-  does today.
-- **Scope-based resolution:** the doc provider and parameter-info callee lookup
-  resolve user symbols through `FirebaseRulesScopes` / `FirebaseRulesReference`,
-  never a textual heuristic — so a forward reference to a function declared later
-  still documents and still shows parameters.
-- **Members are structurally distinct:** a `member_expression` is not a
-  `reference_expression`; member docs come from the fixed table, never from type
-  inference — the same boundary 0.7's symbol inspection relies on.
-
-## Implementation components (0.8)
-
-- `dev.lezli.hotrulez.documentation.FirebaseRulesDocs` — the doc-prose table
-  (shared source of truth; doc-sourced, `UNCONFIRMED`-tagged where needed).
-- `dev.lezli.hotrulez.structureview.FirebaseRulesStructureViewFactory` +
-  `FirebaseRulesStructureViewModel` + `FirebaseRulesStructureViewElement`.
-- `dev.lezli.hotrulez.folding.FirebaseRulesFoldingBuilder`.
-- `dev.lezli.hotrulez.documentation.FirebaseRulesDocumentationProvider`.
-- `dev.lezli.hotrulez.parameterinfo.FirebaseRulesParameterInfoHandler`.
-- Register all four extension points in `plugin.xml`
-  (`lang.psiStructureViewFactory`, `lang.foldingBuilder`,
-  `lang.documentationProvider`, `codeInsight.parameterInfo`), each
-  `language="FirebaseRules"` where applicable.
-- Reuse — do not duplicate — `RulesService`, `FirebaseRulesBuiltins`,
-  `FirebaseRulesScopes`, `FirebaseRulesReference`, the named-element PSI, and the
-  `receiverKey` member-path logic (extract it from the completion contributor to a
-  shared helper if both need it). Regenerate the grammar only if a missing PSI
-  accessor forces a narrow `.bnf` change (none anticipated — the needed nodes all
-  exist).
-
-## Tests (0.8)
-
-- **`FirebaseRulesStructureViewTest`** — build the model for a representative
-  Firestore file and a Storage file; assert the tree shape (service → matches →
-  functions/allows), the presentation strings (match path, `fn(params)`, allow
-  ops), and that a nested/malformed file yields a partial tree without throwing.
-- **`FirebaseRulesFoldingTest`** — fixture-based `myFixture.testFolding(...)`
-  with `<fold text='{…}'>…</fold>` / `/*…*/` markup over service/match/function
-  blocks and a block comment; a case with an unclosed block asserts no bogus fold.
-- **`FirebaseRulesDocumentationTest`** — for each target category assert the
-  generated HTML contains the expected text: an `allow` operation, a built-in
-  global, a Firestore member and a Storage-specific member (dialect-awareness), a
-  path helper and `firestore.get`, a user function (signature + preceding
-  comment), a parameter, a `let`, and a path variable; assert an unknown member
-  and an unresolved name return `null`; assert `getUrlFor` returns the Firebase
-  URL.
-- **`FirebaseRulesParameterInfoTest`** — user-function call (param names +
-  highlighted index as the caret moves across commas), a bare `get(` /
-  `exists(` helper, a `firestore.get(` cross-service helper; assert no signature
-  for a global-namespace call and graceful behavior in a malformed argument list.
-- **Recovery** across all four: a partially malformed file produces no exceptions
-  and unrelated blocks are unaffected (the standing "degrades gracefully" bar).
-- Doc-table integrity: a test asserts every name in `RulesService.members`
-  (both dialects) and every `FirebaseRulesBuiltins.OPERATIONS` entry either has a
-  `FirebaseRulesDocs` entry or is explicitly on an `UNCONFIRMED`/deferred list —
-  so vocabulary and prose cannot drift apart.
-- `./gradlew test` green after the milestone (artifacts are git-ignored; re-run
-  before release). Keep `verifyPlugin` green (new EPs are all stable).
-
-## Acceptance (0.8)
-
-- The **Structure** tool window shows a `.rules` file's service → match →
-  function / allow outline with correct labels, navigation, and alpha-sort, for
-  both dialects, degrading gracefully on malformed input.
-- Service, match, and function braced blocks and block comments **fold**, with
-  the service name / match path staying visible on the collapsed line.
-- **Quick documentation** (hover / Ctrl-Q) shows doc-grounded prose + an external
-  Firebase link for operations, built-ins, dialect-correct members, and helpers,
-  and shows signature/comment for user functions, parameters, `let`s, and path
-  variables — and shows nothing (no fabrication) for unknown members or
-  unresolved names.
-- **Parameter info** (Ctrl-P) shows and highlights the signature for user-function
-  calls and fixed-arity path helpers, and shows nothing for the deliberately
-  out-of-scope calls — never validating arity.
-- All v1/v2/0.7 non-goals still hold: nothing connects to Firebase, evaluates
-  authorization, or infers a type; every doc string is doc-grounded or the user's
-  own text.
-- Tests cover all four features (positives, dialect-awareness, and recovery) and
-  the doc-table integrity check; implementation follows current JetBrains SDK and
-  Firebase docs.
+- A member access on a closed, service-correct built-in receiver whose member is
+  unknown is flagged at weak-warning, with a did-you-mean fix on near matches and a
+  dialect-aware message on cross-dialect mistakes.
+- Nothing under an open receiver is ever flagged (user data, custom claims,
+  `.firebase.*`, metadata, Storage query params), in either dialect.
+- Neutral files flag nothing; malformed files throw nothing; completion is unchanged
+  except that Firestore no longer suggests `request.params`.
+- All prior non-goals hold; no type is inferred; no authorization is judged.
+- Tests cover positives, the full guaranteed-negative set, dialect-awareness, the
+  quick-fix, and drift; implementation follows current JetBrains SDK and Firebase
+  docs.
 - `README.md`, `AGENTS.md`, and the `plugin.xml` `<description>` feature list are
-  updated (description stays text-only — the in-IDE renderer is a limited Swing
-  HTML kit, no images).
+  updated (text-only).
 
-## 0.9 — Toward Semantics (direction, not commitment)
+## Decisions taken (grilled 2026-07-05 — please confirm)
 
-Carried forward from the v3 plan. Begin *doc-grounded* expression analysis, still
-short of runtime evaluation: flag *obvious* member and type mistakes that the
-static Firebase docs make unambiguous — e.g. a member that cannot exist on a
-known built-in in the detected dialect, or an operator applied to plainly
-incompatible literal types — while never asserting authorization, never inventing
-types for user data, and never evaluating a rule. The 0.8 member/doc tables (now
-carrying prose) become an obvious input for a conservative "unknown member on a
-known built-in" check. The exact check set will be shaped by what 0.8 reveals
-about false-positive risk; this milestone stays under-specified until then and
-may split across releases.
+Resolved during the `/grill-me` session; the first three are your explicit choices,
+the rest are recommended defaults grounded in the evidence.
+
+1. **Theme = the roadmap** — m5 is the Toward Semantics milestone (your choice).
+2. **Scope = Candidate A only; defer B** — you initially chose A+B, then, once the
+   inference-by-omission conflict with the doc-grounded anchor was surfaced, chose to
+   defer B and keep m5 doc-grounded-pure.
+3. **Severity = `WEAK WARNING`, on by default** (your choice).
+4. **Quick-fix = did-you-mean + dialect-aware messages** (your choice).
+5. **New `FirebaseRulesMemberInspection`**, not an extension of the symbol
+   inspection (table-based vs resolver-based concern; own toggle).
+6. **Explicit `closedReceivers` flag model** separate from `members`, with a
+   drift-guard test.
+7. **Neutral files suppress** the flag (no union fallback).
+8. **Include `request.query`** as a closed Firestore sub-receiver at weak-warning,
+   tagged `UNCONFIRMED` on exhaustiveness (cheaply reversible; omit if you'd rather
+   ship the four fully-documented interfaces only).
+9. **Single release** — m5 ships as one milestone.
 
 ## Future (explicitly not planned)
 
-Emulator / rules-test-SDK integration and any in-IDE authorization evaluation
-remain out of scope — they would require revisiting the no-connection,
-no-evaluation core principles that define the product.
-
-## Decisions taken while you were away (please confirm)
-
-These were resolved with a recommended default during the `/grill-me` session
-because you were away from the keyboard; each is cheaply reversible.
-
-1. **Archive model.** Archived the current spec/tasks wholesale to `docs/v3/`
-   (matching how `docs/v1/`, `docs/v2/` hold retired programs and your v2→v3
-   "retire + plan" commit), rather than rolling the v3 doc forward in place. The
-   v3 spec itself said 0.8's breakdown was "deferred until 0.7 ships," so a
-   roll-forward was the alternative; the wholesale archive matches your literal
-   instruction and the existing folder structure.
-2. **New-spec identity.** Titled the new working spec by milestone ("0.8 —
-   Authoring Polish") and framed it as a continuation of the v3 Assisted Authoring
-   arc, rather than minting a "v4." 0.8/0.9 genuinely belong to Assisted Authoring.
-3. **Feature set.** Kept exactly the four features the v3 plan committed to
-   (structure view, folding, quick docs, parameter info) — no additions
-   (breadcrumbs, live templates, go-to-symbol) and no drops.
-4. **Doc provider API.** Classic `AbstractDocumentationProvider` /
-   `lang.documentationProvider` over the newer Documentation Target API — the
-   SDK's stated preference for custom languages and consistent with the plugin's
-   other `lang.*` EPs.
-5. **Doc prose lives in a new `FirebaseRulesDocs` table**, not inlined into the
-   existing name-tables (which completion/highlighter/resolver share).
-6. **Structure view surfaces service/match/function/allow only** — not
-   `let`/`return`/path variables (structure, not every statement).
-7. **Parameter info scope** = user functions + fixed-arity path helpers only;
-   global-namespace functions deferred (`UNCONFIRMED` arity), no arity validation.
-8. **Folding** = braced blocks (service/match/function) + block comments, nothing
-   collapsed by default, folding only the `{…}` so heads stay visible.
+Emulator / rules-test-SDK integration and any in-IDE authorization *evaluation*
+remain out of scope. A type-aware semantic pass (which would revive Candidate B and
+enable member checks on inferred types) would be a new arc beyond Assisted
+Authoring, not part of m5.
